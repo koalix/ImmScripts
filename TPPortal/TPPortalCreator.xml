@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!DOCTYPE muclient>
+<!-- Saved on Thursday, December 29, 2016, 11:46 PM -->
+<!-- MuClient version 0.00 -->
+<muclient>
+<plugin
+   name="TP_Portal_Creator"
+   author="Koala"
+   id="a2cc51d02d3f6483828f3ac7"
+   language="Lua"
+   purpose="A helper plugin for creating TP Portals"
+   date_written="2020-12-30 00:00:00"
+   save_state="y"
+   requires="0.00"
+   version="1.00"
+   >
+
+</plugin>
+
+<aliases>
+  <alias enabled="y" sequence="100" ignore_case="y" regexp="y" keep_evaluating="n" script="COMMAND_TPPortal"
+    match="^\s*(?:tpportal|tpporta|tpport|tppor|tppo|tpp)$"
+  > </alias>
+</aliases>
+
+<triggers>
+  <trigger 
+    match="^(?<name>\w+) now has (?<qp>\d{1,3}(,\d{3})*(\.\d+)?) qp, (?<tp>\d{1,3}(,\d{3})*(\.\d+)?) tp and (?<gold>\d{1,3}(,\d{3})*(\.\d+)?) gold.$" 
+    name="VALIDATE_Player" enabled="n" group="TriviaPortalCreator" omit_from_output="n" regexp="y" sequence="99" script="VALIDATE_Player"> 
+  </trigger>
+  <trigger 
+    match="^There is no player with the name (?<name>\w+)\.$" 
+    name="VALIDATE_PlayerName" enabled="n" group="TriviaPortalCreator" omit_from_output="n" regexp="y" sequence="99" script="VALIDATE_Player"> 
+  </trigger>
+  <trigger 
+    match="^\s+I\)\s+First\s+room\s+:\s+(?<firstroom>.*)\s+\(.*\)$" 
+    name="ASSIGN_FirstRoom" enabled="n" group="TriviaPortalCreator" omit_from_output="n" regexp="y" sequence="99" script="ASSIGN_FirstRoom"> 
+  </trigger>
+  <trigger 
+    match="^1 \* generic trivia portal \(badtrip-9\) loaded - (?<id>.*)\.$" 
+    name="ASSIGN_TriviaPortalID" enabled="n" group="TriviaPortalCreator" omit_from_output="n" regexp="y" sequence="99" script="ASSIGN_TriviaPortalID"> 
+  </trigger>  
+  <trigger 
+    match="^\w+ is not a valid area keyword\.$" 
+    name="INVALID_TriviaPortalAreaKeyword" enabled="n" group="TriviaPortalCreator" omit_from_output="n" regexp="y" sequence="99" script="INVALID_TriviaPortalAreaKeyword"> 
+  </trigger>  
+</triggers>
+
+<!--  Get our standard constants -->
+
+<include name="constants.lua"/>
+
+<!--  Script  -->
+<script>
+<![CDATA[
+--[[ External Resources ]]--
+dofile(GetInfo(60) .. "aardwolf_colors.lua") -- Used to support Aard Colors for the cnote() function
+require "gmcphelper"
+require 'serialize'
+
+Debug = false
+Prepend = "@D[@x166TP Portal Creator@D]: @w"
+
+-- Basic print function that supports aard, xterm, and ANSI color codes [idea from Durel's Inventory script]
+function cnote(string) 
+  AnsiNote(stylesToANSI(ColoursToStyles(string)))
+end 
+function dnote(str)
+  if Debug then
+    cnote("@R[DEBUG]: @w"..str.."@w")
+  end
+end
+
+-- TP Portal Creator Table
+function initializeTPPortal()
+  TPPortal = { }
+  TPPortal.default = "badtrip-9"
+  TPPortal.tpcost = 15
+  TPPortal.retry = 1
+  TPPortal.reason = "Trivia Portal"
+  TPPortal.id = 0
+  TPPortal.destination = ""
+  TPPortal.area = ""
+  TPPortal.short = ""
+  TPPortal.long = ""
+  TPPortal.keyword = "portal trivia "
+  TPPortal.owner = ""
+end
+
+function COMMAND_TPPortal( name, line, args )
+  initializeTPPortal()
+  TPPortal.owner = string.lower(utils.inputbox( "Who are you creating the portal for?", "Trivia Portal Owner", "None" ))
+  dnote( ("%s Owner has been set to: @Y%s@w"):format(Prepend, TPPortal.owner) )
+  EnableTrigger("VALIDATE_Player",true)
+  EnableTrigger("VALIDATE_PlayerName",true)
+  SendNoEcho( ("pcharge %s 0 0 0 0"):format(TPPortal.owner) )
+end
+
+function VALIDATE_Player( name, line, args )
+  if name == "VALIDATE_PlayerName" then
+    dnote( ("%s args.tp did not get assigned!!!"):format(Prepend) )
+    cnote( ("%s The tp argument did not get assigned. Aborting the script..."):format(Prepend) )
+    EnableTrigger("VALIDATE_Player",false)
+    EnableTrigger("VALIDATE_PlayerName",false)
+    EnableTriggerGroup("TriviaPortalCreator",false)
+    initializeTPPortal()
+    return
+  elseif name == "VALIDATE_Player" then
+    if not args.tp then
+      dnote( ("%s args.tp did not get assigned!!!"):format(Prepend) )
+      cnote( ("%s The tp argument did not get assigned. Aborting the script..."):format(Prepend) )
+      EnableTrigger("VALIDATE_Player",false)
+      EnableTrigger("VALIDATE_PlayerName",false)
+      EnableTriggerGroup("TriviaPortalCreator",false)
+      initializeTPPortal()
+      return
+    end
+    local tp = string.gsub( args.tp, "%,", "" )
+    if tonumber(tp) < tonumber(TPPortal.tpcost) then
+      dnote( ("%s Player did not have enough tp!!!"):format(Prepend) )
+      cnote( ("%s Player(%s) has insufficient tp. Aborting the script."):format(Prepend, TPPortal.owner) )
+      EnableTrigger("VALIDATE_Player",false)
+      EnableTrigger("VALIDATE_PlayerName",false)
+      EnableTriggerGroup("TriviaPortalCreator",false)
+      initializeTPPortal()
+      return
+    else
+      local area = utils.inputbox( "What is the destination area for this Trivia Portal?", "Trivia Portal Destination", "aylor" )
+      if area == nil then
+        dnote( ("%s 'area == nil' detected. Either the 'cancel' button was pressed or something else happened!"):format(Prepend) )
+        cnote( ("%s You pressed the cancel button. Aborting the script..."):format(Prepend) )
+        EnableTrigger("VALIDATE_Player",false)
+        EnableTrigger("VALIDATE_PlayerName",false)
+        EnableTriggerGroup("TriviaPortalCreator",false)  
+        return
+      else 	
+        TPPortal.area = string.lower(area)
+        dnote( ("%s Area has been set to: @Y%s@w"):format(Prepend, string.lower(TPPortal.area)) )
+      end
+      TPPortal.short = utils.inputbox( "What should the short description be for this TP Portal?", "Trivia Portal Short Description", "None" )
+      dnote( ("%s Short Description has been set to: @Y%s@w"):format(Prepend, TPPortal.short) )
+      TPPortal.long = utils.inputbox( "What should the long description be for this TP Portal?", "Trivia Portal Long Description", "None" )
+      dnote( ("%s Long Description has been set to: @Y%s@w"):format(Prepend, TPPortal.long) )
+      TPPortal.keyword = TPPortal.keyword .. utils.inputbox( "What should the keywords be for this TP Portal?", "Trivia Portal Keywords", "Trivia Portal" )
+      dnote( ("%s Keywords have been set to: @Y%s@w"):format(Prepend, TPPortal.keyword) )
+      EnableTrigger("ASSIGN_FirstRoom",true)
+      EnableTrigger("INVALID_TriviaPortalAreaKeyword", true )
+      EnableTrigger("VALIDATE_Player",false)
+      EnableTrigger("VALIDATE_PlayerName",false)
+      cnote( ("%s Sending the command 'zstat %s' to get the first room information."):format(Prepend, string.lower(TPPortal.area)) )
+      SendNoEcho( ("zstat %s"):format(string.lower(TPPortal.area)) )
+    end
+  end
+end
+
+function INVALID_TriviaPortalAreaKeyword( name, line, args )
+  EnableTrigger("INVALID_TriviaPortalAreaKeyword", false)
+  TPPortal.area = "retry"
+  if TPPortal.retry > 2 then
+    cnote( ("%s It appears as if you do not know the area keyword. Please do some research and try again. Aborting the script..."):format(Prepend) )
+    EnableTrigger("ASSIGN_FirstRoom",false)
+    EnableTrigger("INVALID_TriviaPortalAreaKeyword", false)
+    EnableTriggerGroup("TriviaPortalCreator",false)
+    return
+  end
+  TPPortal.retry = TPPortal.retry + 1
+  cnote( ("%s The area keyword you used was invalid. Please try again..."):format(Prepend, TPPortal.area) )
+  local area = utils.inputbox( "What is the destination area for this Trivia Portal?", "(RETRY) Trivia Portal Destination", "aylor" )
+  if area == nil then
+    dnote( ("%s 'area == nil' detected. Either the 'cancel' button was pressed or something else happened!"):format(Prepend) )
+    cnote( ("%s You pressed the cancel button. Aborting the script..."):format(Prepend) )
+    EnableTrigger("ASSIGN_FirstRoom",false)
+    EnableTrigger("INVALID_TriviaPortalAreaKeyword", false)
+    EnableTriggerGroup("TriviaPortalCreator",false)
+	return
+  elseif area and TPPortal.area == "retry" then
+    TPPortal.area = string.lower(area) 
+    dnote( ("%s Area has been set to: @Y%s@w"):format(Prepend, string.lower(TPPortal.area)) )
+    SendNoEcho( ("zstat %s"):format(string.lower(TPPortal.area)) )
+    EnableTrigger("INVALID_TriviaPortalAreaKeyword", true)
+  end
+end
+
+function ASSIGN_FirstRoom( name, line, args )
+  if not args.firstroom then
+    dnote( ("%s args.firstroom did not get assigned!!!"):format(Prepend) )
+    cnote( ("%s The firstroom argument did not get assigned. Aborting the script..."):format(Prepend) )
+    EnableTrigger("ASSIGN_FirstRoom",false)
+    EnableTrigger("INVALID_TriviaPortalAreaKeyword", false )
+    EnableTriggerGroup("TriviaPortalCreator",false)
+	initializeTPPortal()
+	return
+  end
+  TPPortal.destination = args.firstroom
+  dnote( ("%s Destination room has been set to: @Y%s@w"):format(Prepend, TPPortal.destination) )
+  EnableTrigger("ASSIGN_FirstRoom",false)
+  EnableTrigger("INVALID_TriviaPortalAreaKeyword", true )
+  EnableTrigger("ASSIGN_TriviaPortalID",true)
+  cnote( ("%s Sending the command 'oload %s' to load the default Trivia Portal and obtain the object ID of it."):format(Prepend, TPPortal.default) )
+  SendNoEcho( ("oload %s"):format(TPPortal.default) )
+end
+
+function ASSIGN_TriviaPortalID( name, line, args )
+  if not args.id then 
+    dnote( ("%s args.id did not get assigned!!!"):format(Prepend) )
+    cnote( ("%s The id argument did not get assigned. Aborting the script..."):format(Prepend) )
+    EnableTrigger("ASSIGN_TriviaPortalID",false)
+    EnableTriggerGroup("TriviaPortalCreator",false)
+	initializeTPPortal()
+	return
+  end
+  TPPortal.id = tostring(args.id)
+  dnote( ("%s Trivia Portal ID has been set to: @Y%s@w"):format(Prepend, TPPortal.id) )
+  EnableTrigger("ASSIGN_TriviaPortalID",false)
+  PROCESS_TriviaPortal()
+end
+
+function PROCESS_TriviaPortal()
+  cnote( ("%s Sending the command 'oset %s destination %s' to set the destination on the Trivia Portal."):format(Prepend, TPPortal.id, TPPortal.destination) )
+  SendNoEcho( ("oset %s destination %s"):format(TPPortal.id, TPPortal.destination) )
+  cnote( ("%s Sending the command 'ostring %s short \"%s\"' to set the short description."):format(Prepend, TPPortal.id, TPPortal.short) )
+  SendNoEcho( ("ostring %s short \"%s\""):format(TPPortal.id, TPPortal.short) )
+  cnote( ("%s Sending the command 'ostring %s long \"%s\"' to set the long description."):format(Prepend, TPPortal.id, TPPortal.long) )
+  SendNoEcho( ("ostring %s long \"%s\""):format(TPPortal.id, TPPortal.long) )
+  cnote( ("%s Sending the command 'ostring %s keyword \"%s\"' to set the keywords."):format(Prepend, TPPortal.id, TPPortal.keyword) )
+  SendNoEcho( ("ostring %s keyword \"%s\""):format(TPPortal.id, TPPortal.keyword) )
+  cnote( ("%s Sending the command 'ostring %s OWNER %s' to set the owner."):format(Prepend, TPPortal.id, TPPortal.owner) )
+  SendNoEcho( ("ostring %s OWNER %s"):format(TPPortal.id, TPPortal.owner) )
+  cnote( ("%s Sending the command 'doat %s give %s %s' to give the portal to the owner."):format(Prepend, TPPortal.owner, TPPortal.id, TPPortal.owner) )
+  SendNoEcho( ("doat %s give %s %s"):format(TPPortal.owner, TPPortal.id, TPPortal.owner) )
+  cnote( ("%s Sending the command 'pcharge %s 0 %d 0 %s' to set the long description."):format(Prepend, TPPortal.owner, TPPortal.tpcost, TPPortal.reason) )
+  SendNoEcho( ("pcharge %s 0 %d 0 %s"):format(TPPortal.owner, tonumber(TPPortal.tpcost), TPPortal.reason) )
+  cnote( ("%s Trivia Portal Creation has been completed!!"):format(Prepend) )
+  EnableTriggerGroup("TriviaPortalCreator",false)
+  initializeTPPortal()
+end
+
+function OnPluginInstall()
+    OnPluginEnable()
+end
+function OnPluginEnable()
+  initializeTPPortal()
+end
+function OnHelp ()
+  world.Note (world.GetPluginInfo (world.GetPluginID (), 3))
+end
+]]>
+
+</script>
+</muclient>
