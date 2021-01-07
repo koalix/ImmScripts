@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!DOCTYPE muclient>
+<!-- Saved on Thursday, December 29, 2016, 11:46 PM -->
+<!-- MuClient version 0.00 -->
+<muclient>
+<plugin
+   name="TP_Restring_Assistant"
+   author="Koala"
+   id="57e3ccb6baeb6ad92664b765"
+   language="Lua"
+   purpose="A helper plugin for doing restrings"
+   date_written="2020-12-30 00:00:00"
+   save_state="y"
+   requires="0.00"
+   version="1.00"
+   >
+
+</plugin>
+
+<aliases>
+  <alias enabled="y" sequence="100" ignore_case="y" regexp="y" keep_evaluating="n" script="COMMAND_TPRestring" send_to="12" name="aliasTPRestring"
+    match="^tprestring\s+(?<item>.+)$"
+  > </alias>
+</aliases>
+
+<triggers>
+  <trigger 
+    match="^(?<name>\w+) now has (?<qp>\d{1,3}(,\d{3})*(\.\d+)?) qp, (?<tp>\d{1,3}(,\d{3})*(\.\d+)?) tp and (?<gold>\d{1,3}(,\d{3})*(\.\d+)?) gold.$" 
+    name="VALIDATE_Restring_Player" enabled="n" group="TriviaRestringHelper" omit_from_output="n" regexp="y" sequence="99" script="VALIDATE_Restring_Player"> 
+  </trigger>
+  <trigger 
+    match="^There is no player with the name (?<name>\w+)\.$" 
+    name="VALIDATE_Restring_PlayerName" enabled="n" group="TriviaRestringHelper" omit_from_output="n" regexp="y" sequence="99" script="VALIDATE_Restring_Player"> 
+  </trigger>
+  <trigger 
+    match="^String will display as      : .*\nRaw length of string        : (?<length>\d+)\nLength excluding color codes: \d+$"
+    name="RETURN_StringLength_Short" enabled="n" multi_line="y" lines_to_match="3" group="TriviaRestringHelper" omit_from_output="y" regexp="y" sequence="99" script="RETURN_StringLength"> 
+  </trigger>
+  <trigger 
+    match="^String will display as      : .*\nRaw length of string        : (?<length>\d+)\nLength excluding color codes: \d+$"
+    name="RETURN_StringLength_Long" enabled="n" multi_line="y" lines_to_match="3" group="TriviaRestringHelper" omit_from_output="y" regexp="y" sequence="99" script="RETURN_StringLength"> 
+  </trigger>
+  <trigger 
+    match="^\| Keywords   : (?<keywords>.+)\s+\|$" 
+    name="GET_Keywords" enabled="n" group="TriviaRestringHelper" omit_from_output="n" regexp="y" sequence="99" script="GET_Keywords"> 
+  </trigger>
+  <trigger 
+    match="^\| Id         :\s(?<id>.+)\s+\|$" 
+    name="GET_Id" enabled="n" group="TriviaRestringHelper" omit_from_output="n" regexp="y" sequence="99" script="GET_Id"> 
+  </trigger>
+
+</triggers>
+
+<!--  Get our standard constants -->
+
+<include name="constants.lua"/>
+
+<!--  Script  -->
+<script>
+<![CDATA[
+--[[ External Resources ]]--
+dofile(GetInfo(60) .. "aardwolf_colors.lua") -- Used to support Aard Colors for the cnote() function
+require "gmcphelper"
+require 'serialize'
+
+Debug = false
+Prepend = "@D[@x166TP Restring Helper@D]: @w"
+
+-- Basic print function that supports aard, xterm, and ANSI color codes [idea from Durel's Inventory script]
+function cnote(string) 
+  AnsiNote(stylesToANSI(ColoursToStyles(string)))
+end 
+function dnote(str)
+  if Debug then
+    cnote("@R[DEBUG]: @w"..str.."@w")
+  end
+end
+function trim(s)
+	return s:find'^%s*$' and '' or s:match'^%s*(.*%S)'
+end
+-- TP Restring Helper Table
+function initializeTPRestring()
+  TPRestring = { }
+  TPRestring.tpcost = 2
+  TPRestring.maxshort = 50
+  TPRestring.maxlong = 80
+  TPRestring.reason = "Restring"
+  TPRestring.requestor = ""
+  TPRestring.name = ""
+  TPRestring.id = 0
+  TPRestring.short = ""
+  TPRestring.long = ""
+  TPRestring.keyword = ""
+end
+-- Function to disable all triggers for the script
+function ABORT_TPRestring()
+  dnote( ("%s TPRestring script has been aborted. Disabling all triggers."):format( Prepend ) )
+  EnableTrigger("VALIDATE_Restring_Player",false)
+  EnableTrigger("VALIDATE_Restring_PlayerName",false)
+  EnableTrigger("RETURN_StringLength_Short",false)
+  EnableTrigger("RETURN_StringLength_Long",false)
+  EnableTrigger("GET_Keywords",false)
+  EnableTrigger("GET_Id",false)
+  EnableTriggerGroup("TriviaRestringHelper",false)
+  initializeTPRestring()
+end
+-- Function to return manual input from an InputBox to a table entry
+function RETURN_Input( arg, msg, title, default, dbug )
+  local input = utils.inputbox( msg, title, default)
+  if input == nil then
+    dnote( ("%s User pressed cancel on input box for %s. Aborting TPRestring script."):format(Prepend, dbug) )
+	cnote( ("%s It appears you pressed cancel on the input box during the %s process. The TPRestring script is now aborting and will not continue."):format(Prepend,dbug) )
+    ABORT_TPRestring()
+	return false
+  else
+    TPRestring[arg] = input
+	dnote( ("%s TPRestring[%s] has been set to: @Y%s@w"):format(Prepend, arg, input) )
+    return true
+  end
+end
+-- The 'tprestring' alias function
+function COMMAND_TPRestring( name, line, args )
+  if not args[0] then
+    dnote( ("%s No arguments were passed to command."):format(Prepend) )
+	cnote( ("%s @CSYNTAX: @wtprestring <item name>"):format(Prepend) )
+	return
+  end
+  initializeTPRestring()
+  TPRestring.name = string.lower(args.item)
+  --[[ Gather all manually inputted data up front as this seems to prevent mush from sending the pcharge OVER AND OVER while inputbox is open ]]--
+  if not RETURN_Input( "requestor", "Who is being charged for this restring?", "Trivia Restring Requestor", "None", "COMMAND_TPRestring-REQUESTOR" ) then return
+  elseif not RETURN_Input( "short", "What should the short description be for this TP Restring?", "Trivia Restring Short Description", "None", "COMMAND_TPRestring-SHORT" ) then return
+  elseif not RETURN_Input( "long", "What should the long description be for this TP Restring?", "Trivia Restring Long Description", "None", "COMMAND_TPRestring-LONG" ) then return 
+  elseif not RETURN_Input( "keyword", "What should the keywords be for this TP Restring?", "Trivia Restring Keywords", "Remember only 3 additional keywords", "COMMAND_TPRestring-KEYWORDS" ) then return 
+  end 
+  EnableTrigger("VALIDATE_Restring_Player",true)
+  EnableTrigger("VALIDATE_Restring_PlayerName",true)
+  SendNoEcho( ("pcharge %s 0 0 0 0"):format(TPRestring.requestor) )
+end
+-- Function to validate if player EXISTS and if player has the TP for restring costs
+function VALIDATE_Restring_Player( name, line, args )
+  if name == "VALIDATE_Restring_PlayerName" then
+    dnote( ("%s The player(%s) does not exist or could not be loaded!!!"):format(Prepend, args.name) )
+    cnote( ("%s The player(%s) does not exist or could not be loaded."):format(Prepend, args.name) )
+    ABORT_TPRestring()
+    return
+  elseif name == "VALIDATE_Restring_Player" then
+    if not args.tp then
+      dnote( ("%s args.tp did not get assigned!!!"):format(Prepend) )
+      cnote( ("%s The tp argument did not get assigned."):format(Prepend) )
+      ABORT_TPRestring()
+      return
+    end
+    local tp = string.gsub( args.tp, "%,", "" )
+    if tonumber(tp) < tonumber(TPRestring.tpcost) then
+      dnote( ("%s Player did not have enough tp!!!"):format(Prepend) )
+      cnote( ("%s Player(%s) has insufficient tp."):format(Prepend, TPRestring.requestor) )
+      ABORT_TPRestring()
+      return
+    else
+      EnableTrigger("VALIDATE_Restring_Player",false)
+      EnableTrigger("VALIDATE_Restring_PlayerName",false)
+      EnableTrigger("RETURN_StringLength_Short",true)
+      SendNoEcho( ("checklength %s"):format(TPRestring.short) )
+    end
+  end
+end
+-- Function to capture length from 'checklength' command
+function RETURN_StringLength(name, line, args)
+  if not args.length then
+    dnote( ("%s args.length argument did not get assigned!!!"):format(Prepend) )
+    cnote( ("%s The length argument did not get assigned. Aborting the script..."):format(Prepend) )
+    EnableTrigger("RETURN_StringLength_Short",false)
+    EnableTriggerGroup("TriviaRestringHelper",false)
+    initializeTPRestring()
+	return
+  end
+  if name == "RETURN_StringLength_Short" then
+    if tonumber(args.length) > tonumber(TPRestring.maxshort) then
+      dnote( ("%s Short description had %d characters which is too long."):format(Prepend, tonumber(args.length)) )
+      cnote( ("%s Short description had %d characters which is too long."):format(Prepend, tonumber(args.length)) )
+      EnableTrigger("RETURN_StringLength_Short",false)
+      EnableTriggerGroup("TriviaRestringHelper",false)
+      initializeTPRestring()
+	  return
+	end
+      EnableTrigger("RETURN_StringLength_Short",false)
+      EnableTrigger("RETURN_StringLength_Long",true)
+      SendNoEcho( ("checklength %s"):format(TPRestring.short) )
+  elseif name == "RETURN_StringLength_Long" then
+    if tonumber(args.length) > tonumber(TPRestring.maxlong) then
+      dnote( ("%s Long description had %d characters which is too long."):format(Prepend, tonumber(args.length)) )
+      cnote( ("%s Long description had %d characters which is too long."):format(Prepend, tonumber(args.length)) )
+      EnableTrigger("RETURN_StringLength_Long",false)
+      EnableTriggerGroup("TriviaRestringHelper",false)
+      initializeTPRestring()
+	  return
+	end
+      EnableTrigger("RETURN_StringLength_Long",false)
+      EnableTrigger("GET_Keywords", true)
+      EnableTrigger("GET_Id", true)
+      SendNoEcho( ("identify %s"):format(TPRestring.name) )
+  end
+end
+-- Function to capture 'keywords' from 'identify'
+function GET_Keywords( name, line, args )
+  if not args.keywords then
+    dnote( ("%s Keywords argument did not get populated!"):format(Prepend) )
+    cnote( ("%s Keywords argument did not get populated!"):format(Prepend) )
+    ABORT_TPRestring()
+    return
+  end
+  local okeywords = trim(args.keywords)
+  if string.find(string.lower(okeywords), "no%-restring") then
+    dnote( ("%s Keywords on this object contains 'no-restring'."):format(Prepend) )
+    cnote( ("%s Keywords on this object contains 'no-restring'."):format(Prepend) )
+    ABORT_TPRestring()
+    return
+  end
+  TPRestring.keyword = ("%s %s"):format(okeywords, TPRestring.keyword)
+  EnableTrigger("GET_Keywords",false)
+end
+-- Function to capture 'item id' from 'identify'
+function GET_Id( name, line, args )
+  if not args.id then
+    dnote( ("%s id argument did not get populated!"):format(Prepend) )
+    cnote( ("%s id argument did not get populated!"):format(Prepend) )
+    ABORT_TPRestring()
+    return
+  end
+  TPRestring.id = tostring(args.id)
+  EnableTrigger("GET_Id",false)
+  PROCESS_Restring()  
+end
+-- Function to send all the restring commands to MUD
+function PROCESS_Restring()
+  cnote( ("%s Sending the command 'ostring %s short \"%s\"' to set the short description."):format(Prepend, TPRestring.id, TPRestring.short) )
+  SendNoEcho( ("ostring %s short \"%s\""):format(TPRestring.id, TPRestring.short) )
+  cnote( ("%s Sending the command 'ostring %s long \"%s\"' to set the long description."):format(Prepend, TPRestring.id, TPRestring.long) )
+  SendNoEcho( ("ostring %s long \"%s\""):format(TPRestring.id, TPRestring.long) )
+  cnote( ("%s Sending the command 'ostring %s keyword \"%s\"' to set the keywords."):format(Prepend, TPRestring.id, TPRestring.keyword) )
+  SendNoEcho( ("ostring %s keyword \"%s\""):format(TPRestring.id, TPRestring.keyword) )
+  cnote( ("%s Sending the command 'pcharge %s 0 %d 0 %s' to set the long description."):format(Prepend, TPRestring.requestor, TPRestring.tpcost, TPRestring.reason) )
+  SendNoEcho( ("pcharge %s 0 %d 0 %s"):format(TPRestring.requestor, tonumber(TPRestring.tpcost), TPRestring.reason) )
+  cnote( ("%s Trivia Restring has been completed!!"):format(Prepend) )
+  EnableTriggerGroup("TriviaRestringHelper",false)
+  initializeTPRestring()
+end
+-- MUSHClient Functions
+function OnPluginInstall()
+    OnPluginEnable()
+end
+function OnPluginEnable()
+  initializeTPRestring()
+end
+function OnHelp ()
+  world.Note (world.GetPluginInfo (world.GetPluginID (), 3))
+end
+]]>
+
+</script>
+</muclient>

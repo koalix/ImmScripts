@@ -70,13 +70,11 @@ function dnote(str)
     cnote("@R[DEBUG]: @w"..str.."@w")
   end
 end
-
 -- TP Portal Creator Table
 function initializeTPPortal()
   TPPortal = { }
   TPPortal.default = "badtrip-9"
   TPPortal.tpcost = 15
-  TPPortal.retry = 1
   TPPortal.reason = "Trivia Portal"
   TPPortal.id = 0
   TPPortal.destination = ""
@@ -86,108 +84,91 @@ function initializeTPPortal()
   TPPortal.keyword = "portal trivia "
   TPPortal.owner = ""
 end
-
+-- Function to disable all triggers for the script
+function ABORT_TPPortal()
+  dnote( ("%s TPPortal script has been aborted. Disabling all triggers."):format( Prepend ) )
+  EnableTrigger("VALIDATE_Player",false)
+  EnableTrigger("VALIDATE_PlayerName",false)
+  EnableTrigger("ASSIGN_FirstRoom",false)
+  EnableTrigger("ASSIGN_TriviaPortalID",false)
+  EnableTrigger("INVALID_TriviaPortalAreaKeyword",false)
+  EnableTriggerGroup("TriviaPortalCreator",false)
+  initializeTPPortal()
+end
+-- Function to return manual input from an InputBox to a table entry
+function RETURN_Input( arg, msg, title, default, dbug )
+  local input = utils.inputbox( msg, title, default)
+  if input == nil then
+    dnote( ("%s User pressed cancel on input box for %s. Aborting TPRestring script."):format(Prepend, dbug) )
+	cnote( ("%s It appears you pressed cancel on the input box during the %s process. The TPRestring script is now aborting and will not continue."):format(Prepend,dbug) )
+    ABORT_TPRestring()
+	return false
+  else
+    if (arg == "owner") or (arg == "area") then input = string.lower(input) end
+	if (arg == "keyword") then
+      TPPortal[arg] = TPPortal[arg] .. input
+    else
+    TPPortal[arg] = input
+    end
+	dnote( ("%s TPRestring[%s] has been set to: @Y%s@w"):format(Prepend, arg, input) )
+    return true
+  end
+end
+-- The 'tpportal' alias function
 function COMMAND_TPPortal( name, line, args )
   initializeTPPortal()
-  TPPortal.owner = string.lower(utils.inputbox( "Who are you creating the portal for?", "Trivia Portal Owner", "None" ))
-  dnote( ("%s Owner has been set to: @Y%s@w"):format(Prepend, TPPortal.owner) )
+  if not RETURN_Input( "owner", "Who are you creating the portal for?", "Trivia Portal Owner", "None", "COMMAND_TPPortal-Owner" ) then return
+  elseif not RETURN_Input( "area", "What is the destination area for this Trivia Portal?", "Trivia Portal Destination", "aylor", "COMMAND_TPPortal-Area" ) then return
+  elseif not RETURN_Input( "short", "What should the short description be for this TP Portal?", "Trivia Portal Short Description", "None", "COMMAND_TPPortal-Short" ) then return
+  elseif not RETURN_Input( "long", "What should the long description be for this TP Portal?", "Trivia Portal Long Description", "None", "COMMAND_TPPortal-Long" ) then return
+  elseif not RETURN_Input( "keyword", "What should the keywords be for this TP Portal?", "Trivia Portal Keywords", "Trivia Portal", "COMMAND_TPPortal-Keyword" ) then return
+  end
   EnableTrigger("VALIDATE_Player",true)
   EnableTrigger("VALIDATE_PlayerName",true)
   SendNoEcho( ("pcharge %s 0 0 0 0"):format(TPPortal.owner) )
 end
-
+-- Function to validate if player EXISTS and if player has the TP for Trivia Portal costs
 function VALIDATE_Player( name, line, args )
   if name == "VALIDATE_PlayerName" then
-    dnote( ("%s args.tp did not get assigned!!!"):format(Prepend) )
-    cnote( ("%s The tp argument did not get assigned. Aborting the script..."):format(Prepend) )
-    EnableTrigger("VALIDATE_Player",false)
-    EnableTrigger("VALIDATE_PlayerName",false)
-    EnableTriggerGroup("TriviaPortalCreator",false)
-    initializeTPPortal()
+    dnote( ("%s Player could not be located. %s must be an invalid name!"):format(Prepend, args.name) )
+    dnote( ("%s Player could not be located. %s must be an invalid name!"):format(Prepend, args.name) )
+    ABORT_TPPortal()
     return
   elseif name == "VALIDATE_Player" then
     if not args.tp then
       dnote( ("%s args.tp did not get assigned!!!"):format(Prepend) )
       cnote( ("%s The tp argument did not get assigned. Aborting the script..."):format(Prepend) )
-      EnableTrigger("VALIDATE_Player",false)
-      EnableTrigger("VALIDATE_PlayerName",false)
-      EnableTriggerGroup("TriviaPortalCreator",false)
-      initializeTPPortal()
+      ABORT_TPPortal()
       return
     end
     local tp = string.gsub( args.tp, "%,", "" )
     if tonumber(tp) < tonumber(TPPortal.tpcost) then
       dnote( ("%s Player did not have enough tp!!!"):format(Prepend) )
       cnote( ("%s Player(%s) has insufficient tp. Aborting the script."):format(Prepend, TPPortal.owner) )
-      EnableTrigger("VALIDATE_Player",false)
-      EnableTrigger("VALIDATE_PlayerName",false)
-      EnableTriggerGroup("TriviaPortalCreator",false)
-      initializeTPPortal()
+      ABORT_TPPortal()
       return
     else
-      local area = utils.inputbox( "What is the destination area for this Trivia Portal?", "Trivia Portal Destination", "aylor" )
-      if area == nil then
-        dnote( ("%s 'area == nil' detected. Either the 'cancel' button was pressed or something else happened!"):format(Prepend) )
-        cnote( ("%s You pressed the cancel button. Aborting the script..."):format(Prepend) )
-        EnableTrigger("VALIDATE_Player",false)
-        EnableTrigger("VALIDATE_PlayerName",false)
-        EnableTriggerGroup("TriviaPortalCreator",false)  
-        return
-      else 	
-        TPPortal.area = string.lower(area)
-        dnote( ("%s Area has been set to: @Y%s@w"):format(Prepend, string.lower(TPPortal.area)) )
-      end
-      TPPortal.short = utils.inputbox( "What should the short description be for this TP Portal?", "Trivia Portal Short Description", "None" )
-      dnote( ("%s Short Description has been set to: @Y%s@w"):format(Prepend, TPPortal.short) )
-      TPPortal.long = utils.inputbox( "What should the long description be for this TP Portal?", "Trivia Portal Long Description", "None" )
-      dnote( ("%s Long Description has been set to: @Y%s@w"):format(Prepend, TPPortal.long) )
-      TPPortal.keyword = TPPortal.keyword .. utils.inputbox( "What should the keywords be for this TP Portal?", "Trivia Portal Keywords", "Trivia Portal" )
-      dnote( ("%s Keywords have been set to: @Y%s@w"):format(Prepend, TPPortal.keyword) )
-      EnableTrigger("ASSIGN_FirstRoom",true)
-      EnableTrigger("INVALID_TriviaPortalAreaKeyword", true )
       EnableTrigger("VALIDATE_Player",false)
       EnableTrigger("VALIDATE_PlayerName",false)
+      EnableTrigger("ASSIGN_FirstRoom",true)
+      EnableTrigger("INVALID_TriviaPortalAreaKeyword", true )
       cnote( ("%s Sending the command 'zstat %s' to get the first room information."):format(Prepend, string.lower(TPPortal.area)) )
       SendNoEcho( ("zstat %s"):format(string.lower(TPPortal.area)) )
     end
   end
 end
-
+-- Function to detect a valid zone keyword
 function INVALID_TriviaPortalAreaKeyword( name, line, args )
-  EnableTrigger("INVALID_TriviaPortalAreaKeyword", false)
-  TPPortal.area = "retry"
-  if TPPortal.retry > 2 then
-    cnote( ("%s It appears as if you do not know the area keyword. Please do some research and try again. Aborting the script..."):format(Prepend) )
-    EnableTrigger("ASSIGN_FirstRoom",false)
-    EnableTrigger("INVALID_TriviaPortalAreaKeyword", false)
-    EnableTriggerGroup("TriviaPortalCreator",false)
-    return
-  end
-  TPPortal.retry = TPPortal.retry + 1
-  cnote( ("%s The area keyword you used was invalid. Please try again..."):format(Prepend, TPPortal.area) )
-  local area = utils.inputbox( "What is the destination area for this Trivia Portal?", "(RETRY) Trivia Portal Destination", "aylor" )
-  if area == nil then
-    dnote( ("%s 'area == nil' detected. Either the 'cancel' button was pressed or something else happened!"):format(Prepend) )
-    cnote( ("%s You pressed the cancel button. Aborting the script..."):format(Prepend) )
-    EnableTrigger("ASSIGN_FirstRoom",false)
-    EnableTrigger("INVALID_TriviaPortalAreaKeyword", false)
-    EnableTriggerGroup("TriviaPortalCreator",false)
-	return
-  elseif area and TPPortal.area == "retry" then
-    TPPortal.area = string.lower(area) 
-    dnote( ("%s Area has been set to: @Y%s@w"):format(Prepend, string.lower(TPPortal.area)) )
-    SendNoEcho( ("zstat %s"):format(string.lower(TPPortal.area)) )
-    EnableTrigger("INVALID_TriviaPortalAreaKeyword", true)
-  end
+  cnote( ("%s It appears you used an invalid area keyword."):format(Prepend) )
+  ABORT_TPPortal()
+  return  
 end
-
+-- Function to GET and ASSIGN the FirstRoom for an area
 function ASSIGN_FirstRoom( name, line, args )
   if not args.firstroom then
     dnote( ("%s args.firstroom did not get assigned!!!"):format(Prepend) )
-    cnote( ("%s The firstroom argument did not get assigned. Aborting the script..."):format(Prepend) )
-    EnableTrigger("ASSIGN_FirstRoom",false)
-    EnableTrigger("INVALID_TriviaPortalAreaKeyword", false )
-    EnableTriggerGroup("TriviaPortalCreator",false)
+    cnote( ("%s The firstroom argument did not get assigned."):format(Prepend) )
+    ABORT_TPPortal()
 	initializeTPPortal()
 	return
   end
@@ -199,14 +180,12 @@ function ASSIGN_FirstRoom( name, line, args )
   cnote( ("%s Sending the command 'oload %s' to load the default Trivia Portal and obtain the object ID of it."):format(Prepend, TPPortal.default) )
   SendNoEcho( ("oload %s"):format(TPPortal.default) )
 end
-
+-- Function to assign ID for Trivia Portal
 function ASSIGN_TriviaPortalID( name, line, args )
   if not args.id then 
     dnote( ("%s args.id did not get assigned!!!"):format(Prepend) )
-    cnote( ("%s The id argument did not get assigned. Aborting the script..."):format(Prepend) )
-    EnableTrigger("ASSIGN_TriviaPortalID",false)
-    EnableTriggerGroup("TriviaPortalCreator",false)
-	initializeTPPortal()
+    cnote( ("%s The id argument did not get assigned."):format(Prepend) )
+    ABORT_TPPortal()
 	return
   end
   TPPortal.id = tostring(args.id)
@@ -214,7 +193,7 @@ function ASSIGN_TriviaPortalID( name, line, args )
   EnableTrigger("ASSIGN_TriviaPortalID",false)
   PROCESS_TriviaPortal()
 end
-
+-- Function to send all the portal creation commands to MUD
 function PROCESS_TriviaPortal()
   cnote( ("%s Sending the command 'oset %s destination %s' to set the destination on the Trivia Portal."):format(Prepend, TPPortal.id, TPPortal.destination) )
   SendNoEcho( ("oset %s destination %s"):format(TPPortal.id, TPPortal.destination) )
@@ -234,7 +213,7 @@ function PROCESS_TriviaPortal()
   EnableTriggerGroup("TriviaPortalCreator",false)
   initializeTPPortal()
 end
-
+-- MUSHClient Functions
 function OnPluginInstall()
     OnPluginEnable()
 end
